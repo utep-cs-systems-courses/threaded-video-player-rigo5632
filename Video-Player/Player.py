@@ -3,8 +3,8 @@ from threading import Thread, Semaphore
 import cv2, time
 
 semaphore = Semaphore(2)
-queue1 = []
-queue2 = []
+frameQueue = []
+grayScaleQueue = []
 
 class ExtractFrames(Thread):
     def __init__(self):
@@ -15,15 +15,15 @@ class ExtractFrames(Thread):
         self.count = 0
         
     def run(self):
-        global queue1 #frame queue
+        global frameQueue #frame queue
         global semaphore #lock
         success, image = self.videoCapture.read()
 
         while True:
             # if we have an image and our frame queue is not full: add frame
-            if success and len(queue1) <= self.queueCapacity:
+            if success and len(frameQueue) <= self.queueCapacity:
                 semaphore.acquire() #lock
-                queue1.append(image)
+                frameQueue.append(image)
                 semaphore.release() #lock
 
                 success, image = self.videoCapture.read() #get next frame from file
@@ -33,9 +33,9 @@ class ExtractFrames(Thread):
             # we have acquired all frames
             if self.count == self.totalFrames:
                 semaphore.acquire()
-                queue1.append(-1) #append end key
+                frameQueue.append(-1) #append end key
                 semaphore.release()
-                break
+                break            
         return
             
 class ConvertToGrayScale(Thread):
@@ -45,21 +45,21 @@ class ConvertToGrayScale(Thread):
             self.count = 0
             
         def run(self):
-            global queue1 #frame queue
-            global queue2 #grayscale frame queue
+            global frameQueue #frame queue
+            global grayScaleFrame #grayscale frame queue
             global semaphore #lock
             
             while True:
                 #if we have frames in our queue and our queue is not full
-                if queue1 and len(queue2) <= self.queueCapacity:
+                if len(frameQueue) >= 1 and len(grayScaleQueue) <= self.queueCapacity:
                     semaphore.acquire()
-                    frame = queue1.pop(0) #pop frame from queue1
+                    frame = frameQueue.pop(0) #pop frame from queue1
                     semaphore.release()
 
                     # if we see end key stop appending gray frames, exit thread
                     if type(frame) == int and frame == -1:
                         semaphore.acquire()
-                        queue2.append(-1)
+                        grayScaleQueue.append(-1)
                         semaphore.release()
                         break
                     
@@ -67,9 +67,11 @@ class ConvertToGrayScale(Thread):
                     print(f'Converting Frame {self.count}')
                     grayscaleFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     semaphore.acquire()
-                    queue2.append(grayscaleFrame)
+                    grayScaleQueue.append(grayscaleFrame)
                     semaphore.release()
                     self.count += 1
+                else:
+                    time.sleep(0.10) # sleep if we don't need to do work
             return
 
 class ShowMovie(Thread):
@@ -79,14 +81,14 @@ class ShowMovie(Thread):
         self.count = 0
 
     def run(self):
-        global queue2 #grayscale queue2
+        global grayScaleQueue #grayscale queue2
         global semaphore #lock
 
         while True:
             #as long as we have frames in our queue
-            if queue2:
+            if len(grayScaleQueue) >= 1:
                 semaphore.acquire()
-                frame = queue2.pop(0) #pop frame from queue2
+                frame = grayScaleQueue.pop(0) #pop frame from queue2
                 semaphore.release()
 
                 # if we see the end key, exit display thread
@@ -101,6 +103,9 @@ class ShowMovie(Thread):
                 #exit key
                 if cv2.waitKey(self.delay) and 0xFF == ord('q'):
                     break
+            else:
+                time.sleep(0.10) #sleep if we don't need to do work
+                    
         #destory video screen
         cv2.destroyAllWindows()
         return
@@ -111,8 +116,6 @@ convertFrames = ConvertToGrayScale()
 convertFrames.start()
 displayFrames = ShowMovie()
 displayFrames.start()
-
-
 
 
 
